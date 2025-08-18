@@ -178,14 +178,10 @@ app.post(/^\/storage\/v1\/b$/, async (req, res) => {
 	const { name } = req.body || {};
 	if (!name) return badReq(res, "Missing bucket name");
 	const bucketDir = path.join(ROOT, name);
-	try {
-		await ensureDir(ROOT);
-		if (fs.existsSync(bucketDir)) return conflict(res, `Bucket ${name} already exists`);
-		await ensureDir(bucketDir);
-		return ok(res, { name, kind: "storage#bucket" });
-	} catch (e) {
-		return res.status(500).json({ error: { code: 500, message: e.message } });
-	}
+	await ensureDir(ROOT);
+	if (fs.existsSync(bucketDir)) return conflict(res, `Bucket ${name} already exists`);
+	await ensureDir(bucketDir);
+	return ok(res, { name, kind: "storage#bucket" });
 });
 
 // Upload (simple: media or multipart)
@@ -196,28 +192,24 @@ app.post(/^\/upload\/storage\/v1\/b\/([^/]+)\/o$/, express.raw({ type: "*/*", li
 	const objectName = decodeURIComponent(String(objectNameRaw));
 
 	const bucketDir = path.join(ROOT, bucket);
-	try {
-		// auto-create bucket if missing (dev convenience)
-		if (!fs.existsSync(bucketDir)) await ensureDir(bucketDir);
+	// auto-create bucket if missing (dev convenience)
+	if (!fs.existsSync(bucketDir)) await ensureDir(bucketDir);
 
-		const ctype = req.headers["content-type"] || "";
-		let bytes = req.body || Buffer.alloc(0);
-		let uploadedContentType = undefined;
+	const ctype = req.headers["content-type"] || "";
+	let bytes = req.body || Buffer.alloc(0);
+	let uploadedContentType = undefined;
 
-		if (/^multipart\/related/i.test(ctype)) {
-			({ body: bytes, contentType: uploadedContentType } = parseMultipartRelated(bytes, ctype));
-		}
-
-		const filePath = safeJoin(bucketDir, objectName);
-		await ensureDir(path.dirname(filePath));
-		await fsp.writeFile(filePath, bytes);
-
-		const { json, headers } = await objectMeta(bucket, objectName, uploadedContentType || req.header("Content-Type"));
-		for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-		return ok(res, json);
-	} catch (e) {
-		return res.status(500).json({ error: { code: 500, message: e.message } });
+	if (/^multipart\/related/i.test(ctype)) {
+		({ body: bytes, contentType: uploadedContentType } = parseMultipartRelated(bytes, ctype));
 	}
+
+	const filePath = safeJoin(bucketDir, objectName);
+	await ensureDir(path.dirname(filePath));
+	await fsp.writeFile(filePath, bytes);
+
+	const { json, headers } = await objectMeta(bucket, objectName, uploadedContentType || req.header("Content-Type"));
+	for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+	return ok(res, json);
 });
 
 // Metadata GET (and alt=media on /storage like real GCS)
@@ -225,20 +217,16 @@ app.get(/^\/storage\/v1\/b\/([^/]+)\/o\/(.+)$/, async (req, res) => {
 	const bucket = req.params[0];
 	const objectRel = decodeURIComponent(req.params[1]);
 	const bucketDir = path.join(ROOT, bucket);
-	try {
-		const filePath = safeJoin(bucketDir, objectRel);
-		if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
-		if ((req.query.alt || "") === "media") {
-			const { headers } = await objectMeta(bucket, objectRel);
-			for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-			return fs.createReadStream(filePath).pipe(res);
-		}
-		const { json, headers } = await objectMeta(bucket, objectRel);
+	const filePath = safeJoin(bucketDir, objectRel);
+	if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
+	if ((req.query.alt || "") === "media") {
+		const { headers } = await objectMeta(bucket, objectRel);
 		for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-		return ok(res, json);
-	} catch (e) {
-		return res.status(500).json({ error: { code: 500, message: e.message } });
+		return fs.createReadStream(filePath).pipe(res);
 	}
+	const { json, headers } = await objectMeta(bucket, objectRel);
+	for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+	return ok(res, json);
 });
 
 // Media GET (download endpoint)
@@ -246,15 +234,11 @@ app.get(/^\/download\/storage\/v1\/b\/([^/]+)\/o\/(.+)$/, async (req, res) => {
 	const bucket = req.params[0];
 	const objectRel = decodeURIComponent(req.params[1]);
 	const bucketDir = path.join(ROOT, bucket);
-	try {
-		const filePath = safeJoin(bucketDir, objectRel);
-		if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
-		const { headers } = await objectMeta(bucket, objectRel);
-		for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-		fs.createReadStream(filePath).pipe(res);
-	} catch (e) {
-		return res.status(500).json({ error: { code: 500, message: e.message } });
-	}
+	const filePath = safeJoin(bucketDir, objectRel);
+	if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
+	const { headers } = await objectMeta(bucket, objectRel);
+	for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+	fs.createReadStream(filePath).pipe(res);
 });
 
 // Delete
@@ -262,15 +246,16 @@ app.delete(/^\/storage\/v1\/b\/([^/]+)\/o\/(.+)$/, async (req, res) => {
 	const bucket = req.params[0];
 	const objectRel = decodeURIComponent(req.params[1]);
 	const bucketDir = path.join(ROOT, bucket);
-	try {
-		const filePath = safeJoin(bucketDir, objectRel);
-		if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
-		await fsp.unlink(filePath);
-		return res.status(204).end();
-	} catch (e) {
-		return res.status(500).json({ error: { code: 500, message: e.message } });
-	}
+	const filePath = safeJoin(bucketDir, objectRel);
+	if (!fs.existsSync(filePath)) return notFound(res, "Object not found");
+	await fsp.unlink(filePath);
+	return res.status(204).end();
 });
+
+app.use((err, _req, res, _next) => {
+	console.error(err)
+	return res.status(500).json({ error: { code: 500, message: err.message } });
+})
 
 // ---------------------------- boot -------------------------------------
 app.listen(PORT, async () => {
