@@ -14,13 +14,12 @@ async function main() {
 	const file = bucket.file(TEST_FILENAME)
 	try {
 		const [buf] = await file.download()
-		const contents = buf.toString('utf-8')
+		let contents = buf.toString('utf-8')
 		console.log({ contents })
-		contents += `\m${Math.random()}`
-		await file.save(contents)
+		contents += `\n${Math.random()}`
+		await file.save(contents, { resumable: false })
 	} catch (err) {
-		// todo: unable to validate - should be good *enough*
-		await file.save('line1', { resumable: false, validation: false })
+		await file.save('line1', { resumable: false, validation: true })
 	}
 }
 

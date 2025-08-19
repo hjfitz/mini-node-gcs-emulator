@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const fsp = fs.promises;
 const crypto = require("crypto");
+const { md5Base64, crc32cBase64 } = require("./crypto");
 
 const PORT = process.env.PORT || 8000;
 const ROOT = path.resolve(process.env.GCS_DIR || path.join(process.cwd(), "gcs-data"));
@@ -30,38 +31,6 @@ function safeJoin(base, target) {
 	const rel = path.relative(base, full);
 	if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error("Path traversal detected");
 	return full;
-}
-
-// CRC32C (Castagnoli) ----------------------------------------------------
-const CRC32C_TABLE = (() => {
-	const poly = 0x1edc6f41 >>> 0;
-	const table = new Uint32Array(256);
-	for (let i = 0; i < 256; i++) {
-		let crc = i;
-		for (let j = 0; j < 8; j++) crc = (crc & 1) ? (crc >>> 1) ^ poly : (crc >>> 1);
-		table[i] = crc >>> 0;
-	}
-	return table;
-})();
-
-function crc32c(buf) {
-	let crc = 0xffffffff >>> 0;
-	for (let i = 0; i < buf.length; i++) {
-		const idx = (crc ^ buf[i]) & 0xff;
-		crc = (CRC32C_TABLE[idx] ^ (crc >>> 8)) >>> 0;
-	}
-	return (~crc) >>> 0;
-}
-
-function md5Base64(buf) {
-	return crypto.createHash("md5").update(buf).digest("base64");
-}
-
-function crc32cBase64(buf) {
-	const u32 = crc32c(buf)
-	const b = Buffer.alloc(4);
-	b.writeUInt32BE(u32 >>> 0, 0);
-	return b.toString("base64");
 }
 
 async function objectMeta(bucket, objectRel, contentTypeOverride) {
@@ -95,7 +64,7 @@ async function objectMeta(bucket, objectRel, contentTypeOverride) {
 	};
 	const headers = {
 		"ETag": `"${md5b64}"`,
-		"X-Goog-Hash": `crc32c=${crcB64},md5=${md5b64}`,
+		"x-goog-hash": `crc32c=${crcB64},md5=${md5b64}`,
 		"X-Goog-Generation": String(stat.mtimeMs | 0),
 		"X-Goog-Stored-Content-Encoding": "identity",
 		"Last-Modified": new Date(stat.mtimeMs).toUTCString(),
